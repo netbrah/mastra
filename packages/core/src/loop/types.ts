@@ -23,6 +23,7 @@ import type {
   OutputProcessorOrWorkflow,
   ProcessInputStepArgs,
   ProcessInputStepResult,
+  ProcessorEventCallback,
   ProcessorState,
 } from '../processors';
 import type { RequestContext } from '../request-context';
@@ -141,6 +142,11 @@ export type LoopOptions<TOOLS extends ToolSet = ToolSet, OUTPUT = undefined> = {
    * Keyed by processor ID.
    */
   processorStates?: Map<string, ProcessorState>;
+  /**
+   * Optional callback for receiving events from processors.
+   * When set, processors can emit events (e.g., detections, warnings) via this callback.
+   */
+  onProcessorEvent?: ProcessorEventCallback;
 };
 
 export type LoopRun<Tools extends ToolSet = ToolSet, OUTPUT = undefined> = LoopOptions<Tools, OUTPUT> & {

@@ -26,7 +26,7 @@ import type { Mastra } from '../mastra';
 import type { MastraMemory } from '../memory/memory';
 import type { MemoryConfig, StorageThreadType } from '../memory/types';
 import type { Span, SpanType, TracingContext, TracingOptions, TracingPolicy } from '../observability';
-import type { InputProcessorOrWorkflow, OutputProcessorOrWorkflow } from '../processors/index';
+import type { InputProcessorOrWorkflow, OutputProcessorOrWorkflow, ProcessorEventCallback } from '../processors/index';
 import type { RequestContext } from '../request-context';
 import type { OutputSchema } from '../stream';
 import type { ModelManagerModelConfig } from '../stream/types';
@@ -257,6 +257,11 @@ export interface AgentConfig<
    * If not set, no retries are performed.
    */
   maxProcessorRetries?: number;
+  /**
+   * Optional callback for receiving events from processors.
+   * When set, processors can emit events (e.g., detections, warnings) via this callback.
+   */
+  onProcessorEvent?: ProcessorEventCallback;
   /**
    * Options to pass to the agent upon creation.
    */

@@ -253,6 +253,7 @@ export function createMapResultsStep<OUTPUT = undefined>({
       },
       messageList: memoryData.messageList!,
       maxProcessorRetries: options.maxProcessorRetries,
+      onProcessorEvent: options.onProcessorEvent,
       processorStates: memoryData.processorStates,
     };
 

@@ -285,6 +285,7 @@ export class MastraModelOutput<OUTPUT = undefined> extends MastraBase {
         logger: this.logger,
         agentName: 'MastraModelOutput',
         processorStates: options.processorStates,
+        onProcessorEvent: options.onProcessorEvent,
       });
     }
 

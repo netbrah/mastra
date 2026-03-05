@@ -1877,4 +1877,247 @@ describe('ProcessorRunner', () => {
       expect(receivedWriter).toBe(mockWriter);
     });
   });
+
+  describe('onProcessorEvent callback', () => {
+    it('should pass onProcessorEvent to input processors', async () => {
+      let receivedCallback: unknown = 'NOT_CALLED';
+
+      const inputProcessors: Processor[] = [
+        {
+          id: 'event-test',
+          name: 'Event Test',
+          processInput: async args => {
+            receivedCallback = args.onProcessorEvent;
+            return args.messages;
+          },
+        },
+      ];
+
+      const onProcessorEvent = vi.fn();
+      runner = new ProcessorRunner({
+        inputProcessors,
+        outputProcessors: [],
+        logger: mockLogger,
+        agentName: 'test-agent',
+        onProcessorEvent,
+      });
+
+      messageList.add([createMessage('test message', 'user')], 'user');
+      await runner.runInputProcessors(messageList);
+
+      expect(receivedCallback).toBe(onProcessorEvent);
+    });
+
+    it('should pass onProcessorEvent to output processors (processOutputResult)', async () => {
+      let receivedCallback: unknown = 'NOT_CALLED';
+
+      const outputProcessors: Processor[] = [
+        {
+          id: 'event-test',
+          name: 'Event Test',
+          processOutputResult: async args => {
+            receivedCallback = args.onProcessorEvent;
+            return args.messages;
+          },
+        },
+      ];
+
+      const onProcessorEvent = vi.fn();
+      runner = new ProcessorRunner({
+        inputProcessors: [],
+        outputProcessors,
+        logger: mockLogger,
+        agentName: 'test-agent',
+        onProcessorEvent,
+      });
+
+      messageList.add([createMessage('response', 'assistant')], 'response');
+      await runner.runOutputProcessors(messageList);
+
+      expect(receivedCallback).toBe(onProcessorEvent);
+    });
+
+    it('should pass onProcessorEvent to processOutputStream', async () => {
+      let receivedCallback: unknown = 'NOT_CALLED';
+
+      const outputProcessors: Processor[] = [
+        {
+          id: 'event-test',
+          name: 'Event Test',
+          processOutputStream: async args => {
+            receivedCallback = args.onProcessorEvent;
+            return args.part;
+          },
+        },
+      ];
+
+      const onProcessorEvent = vi.fn();
+      runner = new ProcessorRunner({
+        inputProcessors: [],
+        outputProcessors,
+        logger: mockLogger,
+        agentName: 'test-agent',
+        onProcessorEvent,
+      });
+
+      const processorStates = new Map();
+      await runner.processPart(
+        { type: 'text-delta', payload: { text: 'hello', id: 'text-1' }, runId: '1', from: ChunkFrom.AGENT },
+        processorStates,
+      );
+
+      expect(receivedCallback).toBe(onProcessorEvent);
+    });
+
+    it('should pass onProcessorEvent to processOutputStep', async () => {
+      let receivedCallback: unknown = 'NOT_CALLED';
+
+      const outputProcessors: Processor[] = [
+        {
+          id: 'event-test',
+          name: 'Event Test',
+          processOutputStep: async args => {
+            receivedCallback = args.onProcessorEvent;
+            return args.messages;
+          },
+        },
+      ];
+
+      const onProcessorEvent = vi.fn();
+      runner = new ProcessorRunner({
+        inputProcessors: [],
+        outputProcessors,
+        logger: mockLogger,
+        agentName: 'test-agent',
+        onProcessorEvent,
+      });
+
+      messageList.add([createMessage('user message', 'user')], 'user');
+      messageList.add([createMessage('assistant response', 'assistant')], 'response');
+
+      await runner.runProcessOutputStep({
+        steps: [],
+        messages: messageList.get.all.db(),
+        messageList,
+        stepNumber: 0,
+        finishReason: 'stop',
+        text: 'assistant response',
+      });
+
+      expect(receivedCallback).toBe(onProcessorEvent);
+    });
+
+    it('should allow processors to emit events via onProcessorEvent', async () => {
+      const onProcessorEvent = vi.fn();
+
+      const inputProcessors: Processor[] = [
+        {
+          id: 'emitting-processor',
+          name: 'Emitting Processor',
+          processInput: async args => {
+            await args.onProcessorEvent?.({
+              processorId: 'emitting-processor',
+              type: 'detection',
+              data: { found: true, severity: 'high' },
+            });
+            return args.messages;
+          },
+        },
+      ];
+
+      runner = new ProcessorRunner({
+        inputProcessors,
+        outputProcessors: [],
+        logger: mockLogger,
+        agentName: 'test-agent',
+        onProcessorEvent,
+      });
+
+      messageList.add([createMessage('test', 'user')], 'user');
+      await runner.runInputProcessors(messageList);
+
+      expect(onProcessorEvent).toHaveBeenCalledTimes(1);
+      expect(onProcessorEvent).toHaveBeenCalledWith({
+        processorId: 'emitting-processor',
+        type: 'detection',
+        data: { found: true, severity: 'high' },
+      });
+    });
+
+    it('should not fail when onProcessorEvent is not provided', async () => {
+      const inputProcessors: Processor[] = [
+        {
+          id: 'safe-processor',
+          name: 'Safe Processor',
+          processInput: async args => {
+            // This should not throw when onProcessorEvent is undefined
+            await args.onProcessorEvent?.({
+              processorId: 'safe-processor',
+              type: 'info',
+              data: {},
+            });
+            return args.messages;
+          },
+        },
+      ];
+
+      runner = new ProcessorRunner({
+        inputProcessors,
+        outputProcessors: [],
+        logger: mockLogger,
+        agentName: 'test-agent',
+        // No onProcessorEvent provided
+      });
+
+      messageList.add([createMessage('test', 'user')], 'user');
+      // Should not throw
+      await runner.runInputProcessors(messageList);
+    });
+
+    it('should pass onProcessorEvent to processInputStep', async () => {
+      let receivedCallback: unknown = 'NOT_CALLED';
+
+      const inputProcessors: Processor[] = [
+        {
+          id: 'step-event-test',
+          name: 'Step Event Test',
+          processInputStep: async args => {
+            receivedCallback = args.onProcessorEvent;
+            return undefined;
+          },
+        },
+      ];
+
+      const onProcessorEvent = vi.fn();
+      runner = new ProcessorRunner({
+        inputProcessors,
+        outputProcessors: [],
+        logger: mockLogger,
+        agentName: 'test-agent',
+        onProcessorEvent,
+      });
+
+      messageList.add([createMessage('test', 'user')], 'user');
+
+      // Create a mock model
+      const mockModel = {
+        modelId: 'test-model',
+        provider: 'test',
+        specificationVersion: 'v2' as const,
+        defaultObjectGenerationMode: undefined,
+        doGenerate: vi.fn(),
+        doStream: vi.fn(),
+      };
+
+      await runner.runProcessInputStep({
+        messageList,
+        stepNumber: 0,
+        steps: [],
+        model: mockModel as any,
+        retryCount: 0,
+      });
+
+      expect(receivedCallback).toBe(onProcessorEvent);
+    });
+  });
 });

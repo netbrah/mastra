@@ -37,6 +37,7 @@ import { EntityType, InternalSpans, SpanType, getOrCreateSpan } from '../observa
 import type {
   InputProcessorOrWorkflow,
   OutputProcessorOrWorkflow,
+  ProcessorEventCallback,
   ProcessorWorkflow,
   Processor,
 } from '../processors/index';
@@ -157,6 +158,7 @@ export class Agent<
   #inputProcessors?: DynamicArgument<InputProcessorOrWorkflow[]>;
   #outputProcessors?: DynamicArgument<OutputProcessorOrWorkflow[]>;
   #maxProcessorRetries?: number;
+  #onProcessorEvent?: ProcessorEventCallback;
   #requestContextSchema?: ZodSchema<TRequestContext>;
   readonly #options?: AgentCreateOptions;
   #legacyHandler?: AgentLegacyHandler;
@@ -296,6 +298,10 @@ export class Agent<
       this.#maxProcessorRetries = config.maxProcessorRetries;
     }
 
+    if (config.onProcessorEvent) {
+      this.#onProcessorEvent = config.onProcessorEvent;
+    }
+
     if (config.requestContextSchema) {
       this.#requestContextSchema = config.requestContextSchema;
     }
@@ -412,11 +418,13 @@ export class Agent<
     inputProcessorOverrides,
     outputProcessorOverrides,
     processorStates,
+    onProcessorEvent,
   }: {
     requestContext: RequestContext;
     inputProcessorOverrides?: InputProcessorOrWorkflow[];
     outputProcessorOverrides?: OutputProcessorOrWorkflow[];
     processorStates?: Map<string, ProcessorState>;
+    onProcessorEvent?: ProcessorEventCallback;
   }): Promise<ProcessorRunner> {
     // Resolve processors - overrides replace user-configured but auto-derived (memory, skills) are kept
     const inputProcessors = await this.listResolvedInputProcessors(requestContext, inputProcessorOverrides);
@@ -428,6 +436,7 @@ export class Agent<
       logger: this.logger,
       agentName: this.name,
       processorStates,
+      onProcessorEvent: onProcessorEvent ?? this.#onProcessorEvent,
     });
   }
 
@@ -3811,6 +3820,8 @@ export class Agent<
       methodType: 'generate',
       // Use agent's maxProcessorRetries as default, allow options to override
       maxProcessorRetries: mergedOptions.maxProcessorRetries ?? this.#maxProcessorRetries,
+      // Use agent's onProcessorEvent as default, allow options to override
+      onProcessorEvent: mergedOptions.onProcessorEvent ?? this.#onProcessorEvent,
     } as unknown as InnerAgentExecutionOptions<any>;
 
     const result = await this.#execute(executeOptions);
@@ -3908,6 +3919,8 @@ export class Agent<
       methodType: 'stream',
       // Use agent's maxProcessorRetries as default, allow options to override
       maxProcessorRetries: mergedOptions.maxProcessorRetries ?? this.#maxProcessorRetries,
+      // Use agent's onProcessorEvent as default, allow options to override
+      onProcessorEvent: mergedOptions.onProcessorEvent ?? this.#onProcessorEvent,
     } as unknown as InnerAgentExecutionOptions<OUTPUT>;
 
     const result = await this.#execute(executeOptions);
@@ -4110,6 +4123,8 @@ export class Agent<
       methodType: 'generate',
       // Use agent's maxProcessorRetries as default, allow options to override
       maxProcessorRetries: mergedOptions.maxProcessorRetries ?? this.#maxProcessorRetries,
+      // Use agent's onProcessorEvent as default, allow options to override
+      onProcessorEvent: mergedOptions.onProcessorEvent ?? this.#onProcessorEvent,
     } as unknown as InnerAgentExecutionOptions<OUTPUT>);
 
     if (result.status !== 'success') {

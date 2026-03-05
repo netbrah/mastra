@@ -6,7 +6,7 @@ import type { MastraLanguageModel } from '../llm/model/shared.types';
 import type { CompletionConfig } from '../loop/network/validation';
 import type { LoopConfig, LoopOptions, PrepareStepFunction } from '../loop/types';
 import type { TracingContext, TracingOptions } from '../observability';
-import type { InputProcessorOrWorkflow, OutputProcessorOrWorkflow } from '../processors';
+import type { InputProcessorOrWorkflow, OutputProcessorOrWorkflow, ProcessorEventCallback } from '../processors';
 import type { RequestContext } from '../request-context';
 import type { OutputWriter } from '../workflows/types';
 import type { MessageListInput } from './message-list';
@@ -207,6 +207,12 @@ export type AgentExecutionOptionsBase<OUTPUT> = {
    * If not set, defaults to the agent's maxProcessorRetries (which defaults to no retries if also unset).
    */
   maxProcessorRetries?: number;
+
+  /**
+   * Optional callback for receiving events from processors during this execution.
+   * Overrides agent's default onProcessorEvent.
+   */
+  onProcessorEvent?: ProcessorEventCallback;
 
   /** Additional tool sets that can be used for this execution */
   toolsets?: ToolsetsInput;

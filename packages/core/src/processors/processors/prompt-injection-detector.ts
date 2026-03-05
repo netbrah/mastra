@@ -6,7 +6,7 @@ import { TripWire } from '../../agent/trip-wire';
 import type { ProviderOptions } from '../../llm/model/provider-options';
 import type { MastraModelConfig } from '../../llm/model/shared.types';
 import type { TracingContext } from '../../observability';
-import type { Processor } from '../index';
+import type { Processor, ProcessorEventCallback } from '../index';
 
 /**
  * Individual detection category score
@@ -139,9 +139,10 @@ export class PromptInjectionDetector implements Processor<'prompt-injection-dete
     messages: MastraDBMessage[];
     abort: (reason?: string) => never;
     tracingContext?: TracingContext;
+    onProcessorEvent?: ProcessorEventCallback;
   }): Promise<MastraDBMessage[]> {
     try {
-      const { messages, abort, tracingContext } = args;
+      const { messages, abort, tracingContext, onProcessorEvent } = args;
 
       if (messages.length === 0) {
         return messages;
@@ -163,7 +164,13 @@ export class PromptInjectionDetector implements Processor<'prompt-injection-dete
         results.push(detectionResult);
 
         if (this.isInjectionFlagged(detectionResult)) {
-          const processedMessage = this.handleDetectedInjection(message, detectionResult, this.strategy, abort);
+          const processedMessage = this.handleDetectedInjection(
+            message,
+            detectionResult,
+            this.strategy,
+            abort,
+            onProcessorEvent,
+          );
 
           // If we reach here, strategy is 'warn', 'filter', or 'rewrite'
           if (this.strategy === 'filter') {
@@ -285,12 +292,26 @@ export class PromptInjectionDetector implements Processor<'prompt-injection-dete
     result: PromptInjectionResult,
     strategy: 'block' | 'warn' | 'filter' | 'rewrite',
     abort: (reason?: string) => never,
+    onProcessorEvent?: ProcessorEventCallback,
   ): MastraDBMessage | null {
     const flaggedTypes = (result.categories || []).filter(cat => cat.score >= this.threshold).map(cat => cat.type);
 
     const alertMessage = `Prompt injection detected. Types: ${flaggedTypes.join(', ')}${
       result.reason ? `. Reason: ${result.reason}` : ''
     }${this.includeScores ? `. Scores: ${result.categories?.map(cat => `${cat.type}: ${cat.score}`).join(', ')}` : ''}`;
+
+    // Emit a processor event for the detection
+    void onProcessorEvent?.({
+      processorId: this.id,
+      type: 'detection',
+      data: {
+        strategy,
+        flaggedTypes,
+        reason: result.reason,
+        categories: result.categories,
+        message: alertMessage,
+      },
+    });
 
     switch (strategy) {
       case 'block':
