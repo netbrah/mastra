@@ -2,6 +2,7 @@ import { ReadableStream } from 'node:stream/web';
 import type { ToolSet } from '@internal/ai-sdk-v5';
 import type { MastraDBMessage } from '../../agent/message-list';
 import { getErrorFromUnknown } from '../../error';
+import { createObservabilityContext } from '../../observability';
 import type { ProcessorState } from '../../processors';
 import { ProcessorRunner } from '../../processors/runner';
 import { RequestContext } from '../../request-context';
@@ -91,7 +92,8 @@ export function workflowLoopStream<Tools extends ToolSet = ToolSet, OUTPUT = und
 
         // Handle data-* chunks (custom data chunks from writer.custom())
         // These need to be persisted to storage, not just streamed
-        if (processedChunk.type.startsWith('data-') && messageId) {
+        // Transient chunks are streamed to the client but not saved to the DB
+        if (processedChunk.type.startsWith('data-') && messageId && !('transient' in processedChunk && processedChunk.transient)) {
           const dataPart = {
             type: processedChunk.type as `data-${string}`,
             data: 'data' in processedChunk ? processedChunk.data : undefined,
@@ -178,13 +180,13 @@ export function workflowLoopStream<Tools extends ToolSet = ToolSet, OUTPUT = und
       const executionResult = resumeContext
         ? await run.resume({
             resumeData: resumeContext.resumeData,
-            tracingContext: rest.modelSpanTracker?.getTracingContext(),
+            ...createObservabilityContext(rest.modelSpanTracker?.getTracingContext()),
             requestContext,
             label: toolCallId,
           })
         : await run.start({
             inputData: initialData,
-            tracingContext: rest.modelSpanTracker?.getTracingContext(),
+            ...createObservabilityContext(rest.modelSpanTracker?.getTracingContext()),
             requestContext,
           });
 
