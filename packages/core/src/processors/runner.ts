@@ -18,6 +18,7 @@ import { isProcessorWorkflow } from './index';
 import type {
   ProcessInputStepResult,
   Processor,
+  ProcessorEventCallback,
   ProcessorMessageResult,
   ProcessorStreamWriter,
   ProcessorWorkflow,
@@ -115,6 +116,7 @@ export class ProcessorRunner {
   public readonly outputProcessors: ProcessorOrWorkflow[];
   private readonly logger: IMastraLogger;
   private readonly agentName: string;
+  private readonly onProcessorEvent?: ProcessorEventCallback;
   /**
    * Shared processor state that persists across loop iterations.
    * Used by all processor methods (input and output) to share state.
@@ -128,18 +130,21 @@ export class ProcessorRunner {
     logger,
     agentName,
     processorStates,
+    onProcessorEvent,
   }: {
     inputProcessors?: ProcessorOrWorkflow[];
     outputProcessors?: ProcessorOrWorkflow[];
     logger: IMastraLogger;
     agentName: string;
     processorStates?: Map<string, ProcessorState>;
+    onProcessorEvent?: ProcessorEventCallback;
   }) {
     this.inputProcessors = inputProcessors ?? [];
     this.outputProcessors = outputProcessors ?? [];
     this.logger = logger;
     this.agentName = agentName;
     this.processorStates = processorStates ?? new Map();
+    this.onProcessorEvent = onProcessorEvent;
   }
 
   /**
@@ -319,6 +324,7 @@ export class ProcessorRunner {
         requestContext,
         retryCount,
         writer,
+        onProcessorEvent: this.onProcessorEvent,
       });
 
       // Stop recording and get mutations for this processor
@@ -470,6 +476,7 @@ export class ProcessorRunner {
               messageList,
               retryCount,
               writer,
+              onProcessorEvent: this.onProcessorEvent,
             });
 
             // Track output chunk and update processedPart
@@ -661,6 +668,7 @@ export class ProcessorRunner {
         messageList,
         requestContext,
         retryCount,
+        onProcessorEvent: this.onProcessorEvent,
       });
 
       // Handle MessageList, MastraDBMessage[], or { messages, systemMessages } return types
@@ -909,6 +917,7 @@ export class ProcessorRunner {
           retryCount: args.retryCount ?? 0,
           writer,
           abortSignal: args.abortSignal,
+          onProcessorEvent: this.onProcessorEvent,
         };
 
         const result = await ProcessorRunner.validateAndFormatProcessInputStepResult(
@@ -1109,6 +1118,7 @@ export class ProcessorRunner {
           requestContext,
           retryCount,
           writer,
+          onProcessorEvent: this.onProcessorEvent,
         });
 
         // Stop recording and get mutations for this processor

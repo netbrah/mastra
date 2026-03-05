@@ -509,6 +509,7 @@ export function createLLMExecutionStep<TOOLS extends ToolSet = ToolSet, OUTPUT =
   maxProcessorRetries,
   workspace,
   outputWriter,
+  onProcessorEvent,
 }: OuterLLMRun<TOOLS, OUTPUT>) {
   const initialSystemMessages = messageList.getAllSystemMessages();
 
@@ -581,6 +582,7 @@ export function createLLMExecutionStep<TOOLS extends ToolSet = ToolSet, OUTPUT =
             logger: logger || new ConsoleLogger({ level: 'error' }),
             agentName: agentId || 'unknown',
             processorStates,
+            onProcessorEvent,
           });
 
           try {
@@ -817,6 +819,7 @@ export function createLLMExecutionStep<TOOLS extends ToolSet = ToolSet, OUTPUT =
             tracingContext,
             processorStates,
             requestContext,
+            onProcessorEvent,
           },
         });
 
@@ -992,6 +995,7 @@ export function createLLMExecutionStep<TOOLS extends ToolSet = ToolSet, OUTPUT =
           logger: logger || new ConsoleLogger({ level: 'error' }),
           agentName: agentId || 'unknown',
           processorStates,
+          onProcessorEvent,
         });
 
         try {

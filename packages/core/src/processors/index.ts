@@ -28,6 +28,26 @@ export interface ProcessorStreamWriter {
 }
 
 /**
+ * Event emitted by a processor during processing.
+ * Provides a generalized mechanism for processors to communicate
+ * detection results, warnings, and other events to the caller.
+ */
+export interface ProcessorEvent {
+  /** ID of the processor that emitted the event */
+  processorId: string;
+  /** Type/name of the event (e.g. 'detection', 'warning', 'info') */
+  type: string;
+  /** Event-specific payload */
+  data: unknown;
+}
+
+/**
+ * Callback for receiving processor events.
+ * Set at the agent level or per-execution to receive events from all processors.
+ */
+export type ProcessorEventCallback = (event: ProcessorEvent) => void | Promise<void>;
+
+/**
  * Base context shared by all processor methods
  */
 export interface ProcessorContext<TTripwireMetadata = unknown> {
@@ -58,6 +78,12 @@ export interface ProcessorContext<TTripwireMetadata = unknown> {
    * so they can be canceled when the parent agent is aborted.
    */
   abortSignal?: AbortSignal;
+  /**
+   * Optional callback for emitting processor events.
+   * When set, processors can use this to communicate events (e.g., detections, warnings)
+   * to the caller without needing bespoke callback options.
+   */
+  onProcessorEvent?: ProcessorEventCallback;
 }
 
 /**
