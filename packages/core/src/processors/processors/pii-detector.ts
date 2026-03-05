@@ -8,7 +8,7 @@ import type { ProviderOptions } from '../../llm/model/provider-options';
 import type { MastraModelConfig } from '../../llm/model/shared.types';
 import type { TracingContext } from '../../observability';
 import type { ChunkType } from '../../stream';
-import type { Processor } from '../index';
+import type { Processor, ProcessorEventCallback } from '../index';
 
 /**
  * PII categories for detection and redaction
@@ -204,9 +204,10 @@ export class PIIDetector implements Processor<'pii-detector'> {
     messages: MastraDBMessage[];
     abort: (reason?: string) => never;
     tracingContext?: TracingContext;
+    onProcessorEvent?: ProcessorEventCallback;
   }): Promise<MastraDBMessage[]> {
     try {
-      const { messages, abort, tracingContext } = args;
+      const { messages, abort, tracingContext, onProcessorEvent } = args;
 
       if (messages.length === 0) {
         return messages;
@@ -226,7 +227,13 @@ export class PIIDetector implements Processor<'pii-detector'> {
         const detectionResult = await this.detectPII(textContent, tracingContext);
 
         if (this.isPIIFlagged(detectionResult)) {
-          const processedMessage = this.handleDetectedPII(message, detectionResult, this.strategy, abort);
+          const processedMessage = this.handleDetectedPII(
+            message,
+            detectionResult,
+            this.strategy,
+            abort,
+            onProcessorEvent,
+          );
 
           // If we reach here, strategy is 'warn', 'filter', or 'redact'
           if (this.strategy === 'filter') {
@@ -378,12 +385,26 @@ export class PIIDetector implements Processor<'pii-detector'> {
     result: PIIDetectionResult,
     strategy: 'block' | 'warn' | 'filter' | 'redact',
     abort: (reason?: string) => never,
+    onProcessorEvent?: ProcessorEventCallback,
   ): MastraDBMessage | null {
     const detectedTypes = (result.categories || []).filter(cat => cat.score >= this.threshold).map(cat => cat.type);
 
     const alertMessage = `PII detected. Types: ${detectedTypes.join(', ')}${
       this.includeDetections && result.detections ? `. Detections: ${result.detections.length} items` : ''
     }`;
+
+    // Emit a processor event for the detection
+    void onProcessorEvent?.({
+      processorId: this.id,
+      type: 'detection',
+      data: {
+        strategy,
+        detectedTypes,
+        categories: result.categories,
+        detections: result.detections,
+        message: alertMessage,
+      },
+    });
 
     switch (strategy) {
       case 'block':
@@ -581,8 +602,9 @@ IMPORTANT: Only include PII types that are actually detected. If no PII is found
     state: Record<string, any>;
     abort: (reason?: string) => never;
     tracingContext?: TracingContext;
+    onProcessorEvent?: ProcessorEventCallback;
   }): Promise<ChunkType | null> {
-    const { part, abort, tracingContext } = args;
+    const { part, abort, tracingContext, onProcessorEvent } = args;
     try {
       // Only process text-delta chunks
       if (part.type !== 'text-delta') {
@@ -597,27 +619,36 @@ IMPORTANT: Only include PII types that are actually detected. If no PII is found
       const detectionResult = await this.detectPII(textContent, tracingContext);
 
       if (this.isPIIFlagged(detectionResult)) {
+        const detectedTypes = this.getDetectedTypes(detectionResult);
+
+        // Emit a processor event for the detection
+        void onProcessorEvent?.({
+          processorId: this.id,
+          type: 'detection',
+          data: {
+            phase: 'stream',
+            strategy: this.strategy,
+            detectedTypes,
+            categories: detectionResult.categories,
+            detections: detectionResult.detections,
+          },
+        });
+
         switch (this.strategy) {
           case 'block':
-            abort(`PII detected in streaming content. Types: ${this.getDetectedTypes(detectionResult).join(', ')}`);
+            abort(`PII detected in streaming content. Types: ${detectedTypes.join(', ')}`);
 
           case 'warn':
-            console.warn(
-              `[PIIDetector] PII detected in streaming content: ${this.getDetectedTypes(detectionResult).join(', ')}`,
-            );
+            console.warn(`[PIIDetector] PII detected in streaming content: ${detectedTypes.join(', ')}`);
             return part; // Allow content through with warning
 
           case 'filter':
-            console.info(
-              `[PIIDetector] Filtered streaming part with PII: ${this.getDetectedTypes(detectionResult).join(', ')}`,
-            );
+            console.info(`[PIIDetector] Filtered streaming part with PII: ${detectedTypes.join(', ')}`);
             return null; // Don't emit this part
 
           case 'redact':
             if (detectionResult.redacted_content) {
-              console.info(
-                `[PIIDetector] Redacted PII in streaming content: ${this.getDetectedTypes(detectionResult).join(', ')}`,
-              );
+              console.info(`[PIIDetector] Redacted PII in streaming content: ${detectedTypes.join(', ')}`);
               return {
                 ...part,
                 payload: {
@@ -652,10 +683,12 @@ IMPORTANT: Only include PII types that are actually detected. If no PII is found
     messages,
     abort,
     tracingContext,
+    onProcessorEvent,
   }: {
     messages: MastraDBMessage[];
     abort: (reason?: string) => never;
     tracingContext?: TracingContext;
+    onProcessorEvent?: ProcessorEventCallback;
   }): Promise<MastraDBMessage[]> {
     try {
       if (messages.length === 0) {
@@ -676,7 +709,13 @@ IMPORTANT: Only include PII types that are actually detected. If no PII is found
         const detectionResult = await this.detectPII(textContent, tracingContext);
 
         if (this.isPIIFlagged(detectionResult)) {
-          const processedMessage = this.handleDetectedPII(message, detectionResult, this.strategy, abort);
+          const processedMessage = this.handleDetectedPII(
+            message,
+            detectionResult,
+            this.strategy,
+            abort,
+            onProcessorEvent,
+          );
 
           // If we reach here, strategy is 'warn', 'filter', or 'redact'
           if (this.strategy === 'filter') {
