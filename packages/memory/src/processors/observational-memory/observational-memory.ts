@@ -748,7 +748,7 @@ export class ObservationalMemory implements Processor<'observational-memory'> {
       ObservationalMemory.lastBufferedBoundary.delete(reflBufKey);
       ObservationalMemory.asyncBufferingOps.delete(obsBufKey);
       ObservationalMemory.asyncBufferingOps.delete(reflBufKey);
-      ObservationalMemory.reflectionBufferCycleIds.delete(obsBufKey);
+      ObservationalMemory.reflectionBufferCycleIds.delete(reflBufKey);
     }
   }
 
@@ -1536,6 +1536,12 @@ export class ObservationalMemory implements Processor<'observational-memory'> {
         resourceId: resourceId ?? threadId,
       };
     }
+    if (!threadId) {
+      throw new Error(
+        `ObservationalMemory (scope: 'thread') requires a threadId, but received an empty value. ` +
+          `This is a bug — getThreadContext should have caught this earlier.`,
+      );
+    }
     return {
       threadId,
       resourceId: resourceId ?? threadId,
@@ -2209,8 +2215,8 @@ export class ObservationalMemory implements Processor<'observational-memory'> {
       result = await doGenerate();
       parsed = parseObserverOutput(result.text);
       if (parsed.degenerate) {
-        omDebug(`[OM:callObserver] degenerate repetition on retry, returning empty observations`);
-        return { observations: '' };
+        omDebug(`[OM:callObserver] degenerate repetition on retry, failing`);
+        throw new Error('Observer produced degenerate output after retry');
       }
     }
 
@@ -2299,12 +2305,8 @@ export class ObservationalMemory implements Processor<'observational-memory'> {
       result = await doGenerate();
       parsed = parseMultiThreadObserverOutput(result.text);
       if (parsed.degenerate) {
-        omDebug(`[OM:callMultiThreadObserver] degenerate repetition on retry, returning empty`);
-        const emptyResults = new Map<string, { observations: string }>();
-        for (const threadId of threadOrder) {
-          emptyResults.set(threadId, { observations: '' });
-        }
-        return { results: emptyResults };
+        omDebug(`[OM:callMultiThreadObserver] degenerate repetition on retry, failing`);
+        throw new Error('Multi-thread observer produced degenerate output after retry');
       }
     }
 
@@ -2473,6 +2475,12 @@ export class ObservationalMemory implements Processor<'observational-memory'> {
         break;
       }
 
+      // Guard against infinite loop: if degenerate persists at maxLevel, stop
+      if (parsed.degenerate && currentLevel >= maxLevel) {
+        omDebug(`[OM:callReflector] degenerate output persists at maxLevel=${maxLevel}, breaking`);
+        break;
+      }
+
       // Emit failed marker and start marker for next retry
       if (streamContext?.writer) {
         const failedMarker = this.createObservationFailedMarker({
@@ -2601,6 +2609,16 @@ ${suggestedResponse}
         threadId: serialized.memoryInfo.threadId,
         resourceId: serialized.memoryInfo.resourceId,
       };
+    }
+
+    // In thread scope, threadId is required — without it OM would silently
+    // fall back to a resource-keyed record which causes deadlocks when
+    // multiple threads share the same resourceId.
+    if (this.scope === 'thread') {
+      throw new Error(
+        `ObservationalMemory (scope: 'thread') requires a threadId, but none was found in RequestContext or MessageList. ` +
+          `Ensure the agent is configured with Memory and a valid threadId is provided.`,
+      );
     }
 
     return null;
@@ -3307,8 +3325,13 @@ ${suggestedResponse}
     const { messageList, requestContext, stepNumber, state: _state, writer, abortSignal, abort } = args;
     const state = _state ?? ({} as Record<string, unknown>);
 
+    omDebug(
+      `[OM:processInputStep:ENTER] step=${stepNumber}, hasMastraMemory=${!!requestContext?.get('MastraMemory')}, hasMemoryInfo=${!!messageList?.serialize()?.memoryInfo?.threadId}`,
+    );
+
     const context = this.getThreadContext(requestContext, messageList);
     if (!context) {
+      omDebug(`[OM:processInputStep:NO-CONTEXT] getThreadContext returned null — returning early`);
       return messageList;
     }
 
@@ -4196,15 +4219,10 @@ ${formattedMessages}
       const existingIds = freshRecord?.observedMessageIds ?? record.observedMessageIds ?? [];
       const allObservedIds = [...new Set([...(Array.isArray(existingIds) ? existingIds : []), ...newMessageIds])];
 
-      await this.storage.updateActiveObservations({
-        id: record.id,
-        observations: newObservations,
-        tokenCount: totalTokenCount,
-        lastObservedAt,
-        observedMessageIds: allObservedIds,
-      });
-
-      // Save thread-specific metadata (currentTask, suggestedResponse only)
+      // Save thread-specific metadata BEFORE updating the OM record.
+      // This ensures a consistent lock ordering (mastra_threads → mastra_observational_memory)
+      // that matches the order used by saveMessages, preventing PostgreSQL deadlocks
+      // when concurrent agents share a resourceId.
       if (result.suggestedContinuation || result.currentTask) {
         const thread = await this.storage.getThreadById({ threadId });
         if (thread) {
@@ -4219,6 +4237,14 @@ ${formattedMessages}
           });
         }
       }
+
+      await this.storage.updateActiveObservations({
+        id: record.id,
+        observations: newObservations,
+        tokenCount: totalTokenCount,
+        lastObservedAt,
+        observedMessageIds: allObservedIds,
+      });
 
       // ════════════════════════════════════════════════════════════════════════
       // INSERT END MARKER after successful observation
@@ -4554,7 +4580,7 @@ ${formattedMessages}
       { requestContext },
     );
 
-    // If the observer returned empty observations (e.g., degenerate output), skip buffering
+    // If the observer returned empty observations, skip buffering
     if (!result.observations) {
       omDebug(`[OM:doAsyncBufferedObservation] empty observations returned, skipping buffer storage`);
       return;
